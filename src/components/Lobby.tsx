@@ -52,7 +52,7 @@ export function Lobby(props: Props) {
           <div>
             <div className="heading text-lg text-gold-200">Waiting for players</div>
             <div className="text-sm text-gold-100/60">
-              {players.length}/{6} joined · Min {MIN_PLAYERS}
+              {players.length}/6 joined · Min {MIN_PLAYERS}
             </div>
           </div>
           <button className="btn-outline text-sm" onClick={copyLink}>{copied ? "Copied!" : "Copy invite link"}</button>
@@ -89,19 +89,29 @@ export function Lobby(props: Props) {
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {Object.values(ROLE_INFO).map((r) => {
             const isMe = myRole === r.id;
+            // Uniqueness check: only one player per governance role. Tycoon can be picked by many.
+            const takenBy = r.id !== "TYCOON"
+              ? players.find((pl) => pl.session_id !== me.session_id && (pl.role as RoleId) === r.id)
+              : undefined;
+            const locked = !!takenBy;
             return (
               <button
                 key={r.id}
-                onClick={() => onRoleChange(r.id)}
+                onClick={() => !locked && onRoleChange(r.id)}
                 onDoubleClick={() => setDetail(r.id)}
+                disabled={locked && !isMe}
+                title={takenBy ? `Taken by ${takenBy.player_name}` : undefined}
                 className={`p-3 rounded-lg border text-center transition-all ${
                   isMe
                     ? "border-gold-400 bg-gold-400/10 shadow-gold"
+                    : locked
+                    ? "border-white/5 opacity-40 cursor-not-allowed"
                     : "border-white/10 hover:border-gold-400/60 hover:bg-white/5"
                 }`}
               >
                 <div className="text-2xl mb-1">{r.emoji}</div>
                 <div className="text-xs font-semibold">{r.name}</div>
+                {takenBy && <div className="text-[9px] text-gold-100/40 mt-0.5 truncate">— {takenBy.player_name}</div>}
               </button>
             );
           })}

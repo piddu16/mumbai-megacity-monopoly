@@ -173,6 +173,9 @@ export default function Home() {
             </div>
             {err && <p className="text-red-400 text-sm text-center">{err}</p>}
             <div className="divider" />
+            <Link href="/practice" className="btn-ghost w-full justify-center">
+              🎯 Practice mode (solo, play all players) →
+            </Link>
             <Link href="/rules" className="btn-ghost w-full justify-center">
               Read the rules →
             </Link>

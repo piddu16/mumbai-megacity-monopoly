@@ -29,7 +29,8 @@ export function ActionPanel({ state, me, dispatch }: Props) {
           <button
             className="btn-outline text-sm"
             onClick={() => {
-              dispatch({ type: "DECLINE_BUY", tileId: tile.id });
+              // One dispatch: start auction directly. The decline is implicit — the auction system
+              // handles the outcome. Doing two back-to-back dispatches would clobber state.
               dispatch({ type: "START_AUCTION", tileId: tile.id, minBid: 50 });
             }}
           >

@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import type { GameAction, GameState } from "@/lib/types";
+import type { GameAction, GameState, Player } from "@/lib/types";
 import { findPlayer } from "@/lib/game-engine";
 import { PlayerBar } from "./PlayerBar";
 import { Board } from "./Board";
@@ -26,15 +26,16 @@ interface Props {
 }
 
 type Tab = "game" | "chat" | "deals" | "log";
+type SideTab = "chat" | "deals" | "log";
 
 export function GameBoard(props: Props) {
-  const { state, dispatch, mySessionId, roomCode } = props;
+  const { state, dispatch, mySessionId } = props;
   const [selectedTile, setSelectedTile] = useState<number | null>(null);
-  const [tab, setTab] = useState<Tab>("game");
+  const [mobileTab, setMobileTab] = useState<Tab>("game");
+  const [sideTab, setSideTab] = useState<SideTab>("chat");
 
   const me = findPlayer(state, mySessionId);
   const isMyTurn = state.players[state.current]?.id === mySessionId;
-  const myIndex = state.players.findIndex((p) => p.id === mySessionId);
   const isSpectator = !me;
 
   const activeDeals = useMemo(
@@ -43,18 +44,23 @@ export function GameBoard(props: Props) {
   );
   const unreadDeals = activeDeals.filter((d) => d.toId === mySessionId).length;
 
+  // Unified side content — renders on desktop (right sidebar) OR mobile (tab body)
+  const renderSideContent = (tab: SideTab) => {
+    if (tab === "chat") return <ChatPanel state={state} mySessionId={mySessionId} dispatch={dispatch} />;
+    if (tab === "deals") return <SideDealPanel state={state} me={me} dispatch={dispatch} />;
+    return <GameLog state={state} />;
+  };
+
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col">
       {/* Top player bar */}
       <PlayerBar state={state} mySessionId={mySessionId} />
 
       {/* Split layout: mobile tabs / desktop side-by-side */}
-      <div className="flex-1 lg:grid lg:grid-cols-[1fr_380px] lg:gap-0">
-        {/* ========== LEFT / MAIN — BOARD ========== */}
-        <section
-          className={`${tab === "game" ? "block" : "hidden"} lg:block relative flex flex-col`}
-        >
-          <div className="flex-1 p-3 overflow-auto">
+      <div className="flex-1 min-h-0 lg:grid lg:grid-cols-[1fr_380px] lg:gap-0">
+        {/* ========== MAIN — BOARD + TURN AREA ========== */}
+        <section className={`${mobileTab === "game" ? "flex" : "hidden"} lg:flex relative flex-col min-h-0`}>
+          <div className="flex-1 min-h-0 p-3 overflow-auto">
             <Board
               state={state}
               selectedTile={selectedTile}
@@ -63,7 +69,7 @@ export function GameBoard(props: Props) {
           </div>
 
           {/* Current turn action area */}
-          <div className="border-t border-gold-400/20 bg-navy-950/80 backdrop-blur p-3 space-y-2">
+          <div className="border-t border-gold-400/20 bg-navy-950/80 backdrop-blur p-3 space-y-2 shrink-0">
             <TurnHeader state={state} mySessionId={mySessionId} />
 
             {state.phase === "turn_start" && isMyTurn && (
@@ -82,12 +88,8 @@ export function GameBoard(props: Props) {
               />
             )}
 
-            {state.phase === "landed" && isMyTurn && (
-              <ActionPanel state={state} me={me!} dispatch={dispatch} />
-            )}
-
-            {state.phase === "action" && isMyTurn && (
-              <ActionPanel state={state} me={me!} dispatch={dispatch} />
+            {(state.phase === "landed" || state.phase === "action") && isMyTurn && me && (
+              <ActionPanel state={state} me={me} dispatch={dispatch} />
             )}
 
             {!isMyTurn && state.phase !== "ended" && !isSpectator && (
@@ -96,8 +98,14 @@ export function GameBoard(props: Props) {
               </div>
             )}
 
-            {/* Role powers always accessible */}
-            {me && <RolePowers state={state} me={me} dispatch={dispatch} />}
+            {isSpectator && (
+              <div className="text-center text-gold-100/50 text-xs py-1 italic">
+                👁️ Spectating — you can still chat
+              </div>
+            )}
+
+            {/* Role powers always accessible on your turn */}
+            {me && isMyTurn && <RolePowers state={state} me={me} dispatch={dispatch} />}
           </div>
 
           {/* Overlays */}
@@ -114,7 +122,6 @@ export function GameBoard(props: Props) {
             <WinnerOverlay state={state} />
           )}
 
-          {/* Tile info */}
           {selectedTile != null && (
             <TileInfoSheet
               tileId={selectedTile}
@@ -126,18 +133,22 @@ export function GameBoard(props: Props) {
           )}
         </section>
 
-        {/* ========== RIGHT / SIDEBAR — CHAT + DEALS + LOG ========== */}
-        <aside className="lg:border-l lg:border-gold-400/20 lg:bg-navy-950/30 flex flex-col">
-          <div className={`${tab === "chat" ? "flex" : "hidden"} lg:flex flex-col h-full min-h-0 ${tab === "chat" ? "flex-1" : ""}`}>
-            <Panel tabLabel="Chat" visible={tab === "chat"}>
-              <ChatPanel state={state} mySessionId={mySessionId} dispatch={dispatch} />
-            </Panel>
-          </div>
+        {/* ========== RIGHT SIDEBAR (DESKTOP ONLY) ========== */}
+        <aside className="hidden lg:flex flex-col border-l border-gold-400/20 bg-navy-950/30 min-h-0">
+          <SideTabBar current={sideTab} onChange={setSideTab} dealsBadge={unreadDeals} />
+          <div className="flex-1 min-h-0 overflow-hidden">{renderSideContent(sideTab)}</div>
         </aside>
+
+        {/* ========== MOBILE TAB CONTENT ========== */}
+        {mobileTab !== "game" && (
+          <section className="lg:hidden flex-1 min-h-0 overflow-hidden flex flex-col">
+            {renderSideContent(mobileTab === "deals" ? "deals" : mobileTab === "log" ? "log" : "chat")}
+          </section>
+        )}
       </div>
 
       {/* Mobile tab bar */}
-      <nav className="lg:hidden sticky bottom-0 bg-navy-950/95 backdrop-blur border-t border-gold-400/30 flex items-stretch z-30">
+      <nav className="lg:hidden sticky bottom-0 bg-navy-950/95 backdrop-blur border-t border-gold-400/30 flex items-stretch z-30 shrink-0">
         {[
           { id: "game", label: "Board", emoji: "🎲", badge: 0 },
           { id: "chat", label: "Chat", emoji: "💬", badge: 0 },
@@ -146,9 +157,9 @@ export function GameBoard(props: Props) {
         ].map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id as Tab)}
+            onClick={() => setMobileTab(t.id as Tab)}
             className={`flex-1 flex flex-col items-center justify-center py-2 relative ${
-              tab === t.id ? "text-gold-300" : "text-gold-100/50"
+              mobileTab === t.id ? "text-gold-300" : "text-gold-100/50"
             }`}
           >
             <span className="text-xl">{t.emoji}</span>
@@ -158,29 +169,10 @@ export function GameBoard(props: Props) {
                 {t.badge}
               </span>
             )}
-            {tab === t.id && <span className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-gold-400" />}
+            {mobileTab === t.id && <span className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-gold-400" />}
           </button>
         ))}
       </nav>
-
-      {/* Mobile-only content for deals & log (the 'aside' handles chat on mobile via tab) */}
-      {tab === "deals" && (
-        <div className="lg:hidden flex-1 overflow-auto border-t border-gold-400/20">
-          <SideDealPanel state={state} me={me} dispatch={dispatch} />
-        </div>
-      )}
-      {tab === "log" && (
-        <div className="lg:hidden flex-1 overflow-auto border-t border-gold-400/20">
-          <GameLog state={state} />
-        </div>
-      )}
-
-      {/* Desktop: side deals + log always in right sidebar below chat */}
-      <div className="hidden lg:block fixed right-0 top-[88px] w-[380px] h-[calc(100vh-88px)] border-l border-gold-400/20 bg-navy-950/30 flex flex-col pointer-events-none">
-        <div className="flex-1 pointer-events-auto flex flex-col min-h-0">
-          <DesktopRightRail state={state} mySessionId={mySessionId} dispatch={dispatch} me={me} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -210,44 +202,27 @@ function TurnHeader({ state, mySessionId }: { state: GameState; mySessionId: str
   );
 }
 
-function Panel(props: { children: React.ReactNode; tabLabel: string; visible: boolean }) {
+function SideTabBar(props: { current: SideTab; onChange: (t: SideTab) => void; dealsBadge: number }) {
+  const tabs: { id: SideTab; label: string }[] = [
+    { id: "chat", label: "Chat" },
+    { id: "deals", label: `Deals${props.dealsBadge > 0 ? ` (${props.dealsBadge})` : ""}` },
+    { id: "log", label: "Log" },
+  ];
   return (
-    <div className={`flex-1 min-h-0 ${props.visible ? "block" : "hidden"} lg:block lg:flex-1`}>
-      {props.children}
-    </div>
-  );
-}
-
-function DesktopRightRail(props: { state: GameState; mySessionId: string; dispatch: (a: GameAction) => void; me?: any }) {
-  const [tab, setTab] = useState<"chat" | "deals" | "log">("chat");
-  const activeDeals = props.state.sideDeals.filter((d) => d.status === "proposed");
-  const badge = activeDeals.filter((d) => d.toId === props.mySessionId).length;
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex border-b border-gold-400/20">
-        {[
-          { id: "chat", label: "Chat" },
-          { id: "deals", label: `Deals${badge > 0 ? ` (${badge})` : ""}` },
-          { id: "log", label: "Log" },
-        ].map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id as typeof tab)}
-            className={`flex-1 py-2 text-xs font-semibold tracking-wider uppercase ${
-              tab === t.id
-                ? "text-gold-300 border-b-2 border-gold-400"
-                : "text-gold-100/60 hover:text-gold-100"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div className="flex-1 min-h-0 overflow-hidden">
-        {tab === "chat" && <ChatPanel state={props.state} mySessionId={props.mySessionId} dispatch={props.dispatch} />}
-        {tab === "deals" && <SideDealPanel state={props.state} me={props.me} dispatch={props.dispatch} />}
-        {tab === "log" && <GameLog state={props.state} />}
-      </div>
+    <div className="flex border-b border-gold-400/20 shrink-0">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => props.onChange(t.id)}
+          className={`flex-1 py-2 text-xs font-semibold tracking-wider uppercase ${
+            props.current === t.id
+              ? "text-gold-300 border-b-2 border-gold-400"
+              : "text-gold-100/60 hover:text-gold-100"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }

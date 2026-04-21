@@ -1,4 +1,5 @@
 "use client";
+import { useEffect } from "react";
 import type { GameAction, GameState, Player } from "@/lib/types";
 import { getTile } from "@/lib/tiles";
 import { DEV_LEVELS, PLAYER_COLORS, PLAYER_TOKENS, ZONE_INFO, formatMoney } from "@/lib/constants";
@@ -19,8 +20,16 @@ export function TileInfoSheet({ tileId, state, me, onClose, dispatch }: Props) {
   const rent = prop?.ownerId ? computeRent(state, tileId) : null;
   const canIDev = me && prop?.ownerId === me.id ? canDevelop(state, tileId, me.id) : null;
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-x-0 bottom-0 lg:bottom-auto lg:top-1/2 lg:left-1/2 lg:-translate-x-1/2 lg:-translate-y-1/2 lg:max-w-md z-40 animate-in" onClick={onClose}>
+    <div role="dialog" aria-modal="true" className="fixed inset-x-0 bottom-0 lg:bottom-auto lg:top-1/2 lg:left-1/2 lg:-translate-x-1/2 lg:-translate-y-1/2 lg:max-w-md z-40" onClick={onClose}>
       <div className="card-gold p-5 rounded-t-2xl lg:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">

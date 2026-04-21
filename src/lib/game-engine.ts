@@ -176,7 +176,13 @@ export function reducer(state: GameState, action: GameAction): GameState {
       };
 
     case "AUCTION_BID": {
-      if (!s.auction) return s;
+      if (!s.auction || s.auction.closed) return s;
+      const bidder = s.players.find((p) => p.id === action.playerId);
+      if (!bidder) return s;
+      if (!s.auction.biddersIn.includes(action.playerId)) return s;
+      if (action.amount <= s.auction.currentBid) return s;
+      if (action.amount < s.auction.minBid) return s;
+      if (action.amount > bidder.money) return s;
       return {
         ...s,
         auction: {
@@ -188,7 +194,7 @@ export function reducer(state: GameState, action: GameAction): GameState {
       };
     }
     case "AUCTION_PASS": {
-      if (!s.auction) return s;
+      if (!s.auction || s.auction.closed) return s;
       return {
         ...s,
         auction: {
@@ -306,6 +312,8 @@ export function chooseTransport(s: GameState, mode: TransportMode): GameState {
     return { ...s2, phase: "rolling", lastDice: { a: 0, b: 0, total: 0, mode: "train" } };
   }
   if (mode === "coastal") {
+    // Role gate: Minister + MHADA forbidden per bible
+    if (ROLE_INFO[p.role].cannotCoastal) return s;
     const dest = tile.coastal ? (p.position === 26 ? 38 : 26) : null;
     if (dest == null) return s2;
     const stateAtDest = movePlayerTo(s2, p.id, dest);
@@ -319,6 +327,7 @@ export function chooseTransport(s: GameState, mode: TransportMode): GameState {
         message: `₹50L toll paid to Coastal Road owner.`,
       });
     }
+    // Coastal is a jump — no GO salary
     return resolveLanding(s3);
   }
   if (mode === "metro" && tile.metro) {
@@ -360,9 +369,8 @@ export function rollAndMove(s: GameState, values: [number, number]): GameState {
   if (mode === "train") {
     // For train, values[1] is the destination tile id picked by the UI
     const dest = values[1];
-    const passedStart = dest < p.position;
-    let s2 = movePlayerTo(s, p.id, dest);
-    if (passedStart) s2 = paySalaryIfLoop(s2, p.id, p.position, dest);
+    // Train teleport is a jump — no salary (consistent with Monopoly semantics)
+    const s2 = movePlayerTo(s, p.id, dest);
     return resolveLanding({ ...s2, lastDice: { a: 0, b: 0, total: 0, mode } });
   }
 
@@ -783,6 +791,13 @@ function closeAuction(s: GameState): GameState {
   if (!currentBidderId || currentBid === 0) {
     return { ...s, auction: undefined, phase: "action" };
   }
+  const bidder = findPlayer(s, currentBidderId);
+  if (!bidder || bidder.money < currentBid) {
+    return pushLog({ ...s, auction: undefined, phase: "action" }, {
+      kind: "auction_fail",
+      message: `Top bid couldn't be honored. Auction voided.`,
+    });
+  }
   let s1 = payPlayer(s, currentBidderId, -currentBid);
   s1 = {
     ...s1,
@@ -794,12 +809,11 @@ function closeAuction(s: GameState): GameState {
       pl.id === currentBidderId ? { ...pl, propertyCount: pl.propertyCount + 1 } : pl,
     ),
   };
-  const winner = findPlayer(s1, currentBidderId);
   s1 = pushLog(s1, {
     kind: "auction",
     actorId: currentBidderId,
     amount: currentBid,
-    message: `${winner?.name ?? "Winner"} won ${getTile(tileId).name} at auction for ₹${(currentBid / CRORE).toFixed(1)}Cr.`,
+    message: `${bidder.name} won ${getTile(tileId).name} at auction for ₹${(currentBid / CRORE).toFixed(1)}Cr.`,
   });
   return { ...s1, auction: undefined, phase: "action" };
 }
@@ -809,7 +823,38 @@ function closeAuction(s: GameState): GameState {
 // ═══════════════════════════════════════════════════════════════
 
 function proposeSideDeal(s: GameState, deal: SideDeal): GameState {
-  // Validate
+  const from = findPlayer(s, deal.fromId);
+  const to = findPlayer(s, deal.toId);
+  if (!from || !to || from.id === to.id) return s;
+
+  // Per-asset validation — reject any asset that is malformed or unowned
+  for (const a of deal.offered) {
+    if (a.kind === "cash") {
+      if (!a.amount || a.amount <= 0) return s;
+      if (a.amount > from.money) return s;
+    }
+    if (a.kind === "property") {
+      if (a.tileId == null) return s;
+      if (s.properties[a.tileId]?.ownerId !== deal.fromId) return s;
+    }
+    if (a.kind === "favor") {
+      if (!a.count || a.count <= 0) return s;
+    }
+  }
+  for (const a of deal.requested) {
+    if (a.kind === "cash") {
+      if (!a.amount || a.amount <= 0) return s;
+      if (a.amount > to.money) return s;
+    }
+    if (a.kind === "property") {
+      if (a.tileId == null) return s;
+      if (s.properties[a.tileId]?.ownerId !== deal.toId) return s;
+    }
+    if (a.kind === "favor") {
+      if (!a.count || a.count <= 0) return s;
+    }
+  }
+
   const totalCashOffered = deal.offered.reduce((sum, a) => sum + (a.kind === "cash" ? a.amount ?? 0 : 0), 0);
   const totalCashRequested = deal.requested.reduce(
     (sum, a) => sum + (a.kind === "cash" ? a.amount ?? 0 : 0),
@@ -850,22 +895,34 @@ function acceptSideDeal(s: GameState, dealId: string): GameState {
   const deal = s.sideDeals.find((d) => d.id === dealId);
   if (!deal || deal.status !== "proposed") return s;
 
-  let s1 = s;
-  // Transfer each asset
+  // Re-validate at acceptance time — state may have changed since proposal
+  const from = findPlayer(s, deal.fromId);
+  const to = findPlayer(s, deal.toId);
+  if (!from || !to) return s;
   for (const a of deal.offered) {
-    s1 = transferAsset(s1, deal.fromId, deal.toId, a);
+    if (a.kind === "cash" && (a.amount ?? 0) > from.money) return reject(s, dealId);
+    if (a.kind === "property" && s.properties[a.tileId ?? -1]?.ownerId !== deal.fromId) return reject(s, dealId);
   }
   for (const a of deal.requested) {
-    s1 = transferAsset(s1, deal.toId, deal.fromId, a);
+    if (a.kind === "cash" && (a.amount ?? 0) > to.money) return reject(s, dealId);
+    if (a.kind === "property" && s.properties[a.tileId ?? -1]?.ownerId !== deal.toId) return reject(s, dealId);
   }
+
+  let s1 = s;
+  for (const a of deal.offered) s1 = transferAsset(s1, deal.fromId, deal.toId, a);
+  for (const a of deal.requested) s1 = transferAsset(s1, deal.toId, deal.fromId, a);
   s1 = {
     ...s1,
     sideDeals: s1.sideDeals.map((d) => (d.id === dealId ? { ...d, status: "accepted" as const } : d)),
   };
-  return pushLog(s1, {
-    kind: "side_deal_accepted",
-    message: `Deal accepted.`,
-  });
+  return pushLog(s1, { kind: "side_deal_accepted", message: `Deal accepted.` });
+}
+
+function reject(s: GameState, dealId: string): GameState {
+  return {
+    ...s,
+    sideDeals: s.sideDeals.map((d) => (d.id === dealId ? { ...d, status: "rejected" as const } : d)),
+  };
 }
 
 function transferAsset(s: GameState, fromId: string, toId: string, a: { kind: "cash" | "property" | "favor"; amount?: number; tileId?: number; count?: number }): GameState {
@@ -953,7 +1010,15 @@ function applyPower(s: GameState, power: string, payload: Record<string, unknown
       const tileId = payload.tileId as number;
       const prop = s.properties[tileId];
       if (!prop || prop.ownerId !== p.id) return s;
-      const newLevel = Math.min(5, prop.devLevel + 2) as DevLevel;
+      if (prop.stayUntil && prop.stayUntil > s.round) return s;
+      const tile = getTile(tileId);
+      const effectiveFsi = (tile.fsi ?? 1) + (prop.fsiOverride ?? 0) + (tile.zone ? s.fsiOverride[tile.zone] : 0);
+      let newLevel = Math.min(5, prop.devLevel + 2) as DevLevel;
+      // Respect FSI ceiling
+      while (newLevel > 0 && DEV_LEVELS[newLevel].minFsi > effectiveFsi) {
+        newLevel = (newLevel - 1) as DevLevel;
+      }
+      if (newLevel === prop.devLevel) return s;
       return {
         ...s,
         properties: { ...s.properties, [tileId]: { ...prop, devLevel: newLevel } },
@@ -1006,6 +1071,7 @@ function applyPower(s: GameState, power: string, payload: Record<string, unknown
     }
     case "affordable_housing": {
       if (p.role !== "MINISTER") return s;
+      if (p.powerUses.ministerFsiUsedThisRound) return s;  // reuse the once-per-round slot
       const zone = payload.zone as ZoneId;
       const affectedTiles = tilesInZone(zone).map((t) => t.id);
       const updated = { ...s.properties };
@@ -1015,10 +1081,18 @@ function applyPower(s: GameState, power: string, payload: Record<string, unknown
         }
       }
       const s1 = payPlayer({ ...s, properties: updated }, p.id, 50 * LAKH);
-      return s1;
+      return {
+        ...s1,
+        players: s1.players.map((pl) =>
+          pl.id === p.id
+            ? { ...pl, powerUses: { ...pl.powerUses, ministerFsiUsedThisRound: true } }
+            : pl,
+        ),
+      };
     }
     case "sra_scheme": {
       if (p.role !== "MHADA") return s;
+      if (p.powerUses.mhadaLotteryUsedThisRound) return s;  // reuse slot for SRA too
       const tileId = payload.tileId as number;
       const prop = s.properties[tileId];
       if (!prop || prop.devLevel > 1) return s;
@@ -1028,6 +1102,11 @@ function applyPower(s: GameState, power: string, payload: Record<string, unknown
           ...s.properties,
           [tileId]: { ...prop, fsiOverride: (prop.fsiOverride ?? 0) + ((getTile(tileId).fsi ?? 2) * 1) },
         },
+        players: s.players.map((pl) =>
+          pl.id === p.id
+            ? { ...pl, powerUses: { ...pl.powerUses, mhadaLotteryUsedThisRound: true } }
+            : pl,
+        ),
       };
     }
     default:
@@ -1085,6 +1164,10 @@ function standoffBet(s: GameState, playerId: string, action: "call" | "raise" | 
   if (!s.standoff) return s;
   const st = s.standoff;
   if (st.currentActor !== playerId) return s;
+  if (playerId !== st.p1 && playerId !== st.p2) return s;
+
+  const bettor = findPlayer(s, playerId);
+  if (!bettor) return s;
 
   let newSt: StandoffState = { ...st, log: [...st.log, { at: Date.now(), actor: playerId, action: `${action} ${amount || ""}` }] };
 
@@ -1093,16 +1176,20 @@ function standoffBet(s: GameState, playerId: string, action: "call" | "raise" | 
     return resolveStandoffWinner({ ...s, standoff: { ...newSt, reveal: true, winnerId: winner } }, winner);
   }
   if (action === "call") {
-    // Both called → next round or showdown
     newSt = { ...newSt, currentBet: 0, currentActor: playerId === st.p1 ? st.p2 : st.p1 };
     if (newSt.round >= 3) {
       return standoffReveal({ ...s, standoff: newSt });
     }
     newSt.round += 1;
+    return { ...s, standoff: newSt };
   }
   if (action === "raise") {
+    // Validate raise: positive, within max, affordable
+    if (amount <= 0) return s;
+    if (amount > st.maxRaise) return s;
+    if (amount > bettor.money) return s;
     const pot = newSt.pot + amount;
-    let s1 = payPlayer(s, playerId, -amount);
+    const s1 = payPlayer(s, playerId, -amount);
     newSt = { ...newSt, pot, currentBet: amount, currentActor: playerId === st.p1 ? st.p2 : st.p1 };
     return { ...s1, standoff: newSt };
   }
@@ -1133,24 +1220,37 @@ function standoffReveal(s: GameState): GameState {
 function resolveStandoffWinner(s: GameState, winnerId: string): GameState {
   if (!s.standoff) return s;
   const pot = s.standoff.pot;
+  const loserId = s.standoff.p1 === winnerId ? s.standoff.p2 : s.standoff.p1;
   let s1 = payPlayer(s, winnerId, pot);
   // Stats
   s1 = {
     ...s1,
     players: s1.players.map((p) => {
       if (p.id === winnerId) return { ...p, standoffsWon: p.standoffsWon + 1, streak: p.streak + 1 };
-      if (p.id === (s.standoff!.p1 === winnerId ? s.standoff!.p2 : s.standoff!.p1))
+      if (p.id === loserId)
         return { ...p, standoffsLost: p.standoffsLost + 1, streak: 0 };
       return p;
     }),
   };
-  // Disputed asset transfer
+  // Disputed asset transfer — keep propertyCount in sync
   if (s.standoff.disputedTileId != null) {
     const prop = s1.properties[s.standoff.disputedTileId];
-    if (prop) {
+    if (prop && prop.ownerId && prop.ownerId !== winnerId) {
+      const oldOwnerId = prop.ownerId;
       s1 = {
         ...s1,
         properties: { ...s1.properties, [s.standoff.disputedTileId]: { ...prop, ownerId: winnerId } },
+        players: s1.players.map((p) => {
+          if (p.id === winnerId) return { ...p, propertyCount: p.propertyCount + 1 };
+          if (p.id === oldOwnerId) return { ...p, propertyCount: Math.max(0, p.propertyCount - 1) };
+          return p;
+        }),
+      };
+    } else if (prop && !prop.ownerId) {
+      s1 = {
+        ...s1,
+        properties: { ...s1.properties, [s.standoff.disputedTileId]: { ...prop, ownerId: winnerId } },
+        players: s1.players.map((p) => (p.id === winnerId ? { ...p, propertyCount: p.propertyCount + 1 } : p)),
       };
     }
   }
@@ -1250,32 +1350,48 @@ export function endTurn(s: GameState): GameState {
     return { ...s, phase: "ended", winnerId: ranked[0].id };
   }
 
-  // Reset per-round power uses
-  const resetPlayers = s.players.map((pl) =>
-    nextIdx <= s.current
-      ? {
-          ...pl,
-          powerUses: {
-            ...pl.powerUses,
-            judgeReviewUsedThisRound: false,
-            ministerFsiUsedThisRound: false,
-            mhadaLotteryUsedThisRound: false,
-          },
-        }
-      : pl,
-  );
+  // Reset per-round power uses + expire Judge stays
+  const newRoundStarted = nextIdx <= s.current;
+  const resetPlayers = s.players.map((pl) => {
+    if (!newRoundStarted) return pl;
+    // Expire judgeStays whose stayUntil <= new round
+    const activeStays = (pl.powerUses.judgeStays ?? []).filter((tid) => {
+      const prop = s.properties[tid];
+      return prop && prop.stayUntil != null && prop.stayUntil > nextRound;
+    });
+    return {
+      ...pl,
+      powerUses: {
+        ...pl.powerUses,
+        judgeReviewUsedThisRound: false,
+        ministerFsiUsedThisRound: false,
+        mhadaLotteryUsedThisRound: false,
+        judgeStays: activeStays,
+      },
+    };
+  });
+  // Clear expired stays on properties
+  const refreshedProps = { ...s.properties };
+  if (newRoundStarted) {
+    for (const [tid, pr] of Object.entries(refreshedProps)) {
+      if (pr.stayUntil != null && pr.stayUntil <= nextRound) {
+        refreshedProps[Number(tid)] = { ...pr, stayUntil: undefined, stayById: undefined };
+      }
+    }
+  }
 
   // Start-of-round passives
   let s2: GameState = {
     ...s,
     players: resetPlayers,
+    properties: refreshedProps,
     current: nextIdx,
     round: nextRound,
     turnNumber: nextTurn,
     phase: "turn_start",
   };
 
-  if (nextIdx <= s.current) {
+  if (newRoundStarted) {
     // New round — apply passives
     s2 = applyRoundStartPassives(s2);
   }

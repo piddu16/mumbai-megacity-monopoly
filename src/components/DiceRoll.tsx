@@ -1,11 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TransportMode } from "@/lib/types";
 import { TILES } from "@/lib/tiles";
 
 interface Props {
   mode: TransportMode;
-  stations?: number[]; // for train
+  stations?: number[];
   onRoll: (values: [number, number]) => void;
 }
 
@@ -14,26 +14,42 @@ const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 export function DiceRoll({ mode, stations, onRoll }: Props) {
   const [rolling, setRolling] = useState(false);
   const [dice, setDice] = useState<[number, number]>([1, 1]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      for (const t of timeoutsRef.current) clearTimeout(t);
+    };
+  }, []);
 
   function roll() {
     if (rolling) return;
     setRolling(true);
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
+      if (!mountedRef.current) return;
       setDice([rand(), rand()]);
     }, 75);
-    setTimeout(() => {
-      clearInterval(interval);
-      const final: [number, number] = [rand(), rand()];
-      setDice(final);
-      setRolling(false);
-      setTimeout(() => onRoll(final), 400);
-    }, 900);
+    timeoutsRef.current.push(
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        const final: [number, number] = [rand(), rand()];
+        setDice(final);
+        setRolling(false);
+        timeoutsRef.current.push(
+          setTimeout(() => {
+            if (!mountedRef.current) return;
+            onRoll(final);
+          }, 400),
+        );
+      }, 900),
+    );
   }
-
-  useEffect(() => {
-    if (mode === "train") return; // user picks station instead
-    if (mode === "metro") return; // separate button
-  }, [mode]);
 
   if (mode === "train" && stations) {
     return (
@@ -41,11 +57,7 @@ export function DiceRoll({ mode, stations, onRoll }: Props) {
         <div className="text-xs text-gold-200/80 mb-2">Pick a station to teleport to</div>
         <div className="grid grid-cols-4 gap-2">
           {stations.map((id) => (
-            <button
-              key={id}
-              onClick={() => onRoll([0, id])}
-              className="btn-outline text-xs py-2"
-            >
+            <button key={id} onClick={() => onRoll([0, id])} className="btn-outline text-xs py-2">
               🚂 {TILES[id].name}
             </button>
           ))}
@@ -57,7 +69,7 @@ export function DiceRoll({ mode, stations, onRoll }: Props) {
   return (
     <div className="text-center">
       <div className="text-xs text-gold-200/80 mb-2">
-        {mode === "metro" ? "Roll 1 die (1 = breakdown, else jump to next station)" : "Roll the dice"}
+        {mode === "metro" ? "Roll 1 die. 1 = breakdown. Anything else = jump." : "Roll the dice"}
       </div>
       <div className="flex items-center justify-center gap-3 mb-3">
         <Die face={dice[0]} rolling={rolling} />

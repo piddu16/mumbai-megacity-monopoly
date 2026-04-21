@@ -17,6 +17,7 @@ export function PlayerBar({ state, mySessionId }: Props) {
           const color = PLAYER_COLORS[p.number];
           const token = PLAYER_TOKENS[p.number];
           const role = ROLE_INFO[p.role];
+          const offline = p.connected === false;
           return (
             <div
               key={p.id}
@@ -24,16 +25,25 @@ export function PlayerBar({ state, mySessionId }: Props) {
                 isCurrent
                   ? "border-gold-400 bg-gold-400/10 shadow-gold"
                   : "border-white/10 bg-navy-900/50"
-              } ${isMe ? "ring-1 ring-gold-400/40" : ""}`}
+              } ${isMe ? "ring-1 ring-gold-400/40" : ""} ${offline ? "opacity-60" : ""}`}
             >
               <div className="flex items-center gap-2">
-                <span
-                  className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-xs"
-                  style={{ background: color }}
-                  title={role.name}
-                >
-                  {token}
-                </span>
+                <div className="relative shrink-0">
+                  <span
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-xs"
+                    style={{ background: color }}
+                    title={role.name}
+                  >
+                    {token}
+                  </span>
+                  {/* Connection dot */}
+                  <span
+                    className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-navy-950 ${
+                      offline ? "bg-gray-500" : "bg-green-400"
+                    }`}
+                    title={offline ? "Offline" : "Online"}
+                  />
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold truncate flex items-center gap-1">
                     {p.name}

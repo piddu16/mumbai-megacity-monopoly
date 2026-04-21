@@ -36,10 +36,24 @@ export default function GamePage() {
   const dispatch = useCallback(
     (action: GameAction) => {
       if (!state) return;
+      // Client-side turn guard: only the current player can dispatch turn-gated actions.
+      // Multi-player actions (auctions, chat, side deals, committee votes, standoff bets)
+      // are always allowed. Server-authoritative enforcement lives in the Edge Function.
+      const UNIVERSAL = new Set<GameAction["type"]>([
+        "AUCTION_BID", "AUCTION_PASS", "AUCTION_CLOSE",
+        "SEND_CHAT",
+        "PROPOSE_SIDE_DEAL", "ACCEPT_SIDE_DEAL", "REJECT_SIDE_DEAL", "FLAG_SIDE_DEAL",
+        "COMMITTEE_VOTE", "COMMITTEE_RESOLVE",
+        "STANDOFF_BET", "STANDOFF_CHOOSE_BLIND", "STANDOFF_REVEAL",
+        "LOG",
+      ]);
+      if (!UNIVERSAL.has(action.type) && state.players[state.current]?.id !== sessionId) {
+        return; // not your turn
+      }
       const next = reducer(state, action);
       writeState(next);
     },
-    [state, writeState],
+    [state, writeState, sessionId],
   );
 
   const startGame = useCallback(
