@@ -1,6 +1,6 @@
 "use client";
-import { useMemo, useState } from "react";
-import type { GameAction, GameState, Player } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { GameAction, GameState } from "@/lib/types";
 import { findPlayer } from "@/lib/game-engine";
 import { PlayerBar } from "./PlayerBar";
 import { Board } from "./Board";
@@ -16,7 +16,11 @@ import { StandoffPanel } from "./StandoffPanel";
 import { CommitteeVote } from "./CommitteeVote";
 import { WinnerOverlay } from "./WinnerOverlay";
 import { RolePowers } from "./RolePowers";
+import { CityBackground } from "./CityBackground";
+import { TurnCinematic } from "./TurnCinematic";
+import { EventDrama, type DramaEvent } from "./EventDrama";
 import { formatMoney } from "@/lib/constants";
+import { playSfx, toggleMute, isMuted } from "@/lib/sound";
 
 interface Props {
   state: GameState;
@@ -33,10 +37,47 @@ export function GameBoard(props: Props) {
   const [selectedTile, setSelectedTile] = useState<number | null>(null);
   const [mobileTab, setMobileTab] = useState<Tab>("game");
   const [sideTab, setSideTab] = useState<SideTab>("chat");
+  const [muted, setMutedState] = useState(false);
+  const [drama, setDrama] = useState<DramaEvent | null>(null);
 
   const me = findPlayer(state, mySessionId);
   const isMyTurn = state.players[state.current]?.id === mySessionId;
   const isSpectator = !me;
+
+  useEffect(() => { setMutedState(isMuted()); }, []);
+
+  // Day/night mood cycle — every 10 rounds
+  const mood: "night" | "dusk" | "monsoon" | "crisis" =
+    state.phase === "ended" ? "dusk" :
+    state.round >= 20 ? "crisis" :
+    state.round >= 10 ? "monsoon" :
+    "night";
+
+  // Watch game log for dramatic events and surface them as cinematic toasts
+  const lastLogIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const last = state.log[state.log.length - 1];
+    if (!last || last.id === lastLogIdRef.current) return;
+    lastLogIdRef.current = last.id;
+
+    // Only show drama for events that touch the current user or are dramatic enough
+    const myEvent = last.actorId === mySessionId;
+    if (last.kind === "buy" && myEvent) {
+      setDrama({ id: last.id, tone: "money_out", title: "Acquired", body: last.message, icon: "🏘️" });
+    } else if (last.kind === "rent" && myEvent) {
+      setDrama({ id: last.id, tone: "rent", title: "Rent Paid", body: last.message, icon: "💸" });
+    } else if (last.kind === "tax" && myEvent) {
+      setDrama({ id: last.id, tone: "tax", title: "Tax", body: last.message, icon: "📜" });
+    } else if (last.kind === "salary" && myEvent) {
+      setDrama({ id: last.id, tone: "money_in", title: "Salary", body: last.message, icon: "💰" });
+    } else if (last.kind === "penthouse" && myEvent) {
+      setDrama({ id: last.id, tone: "win", title: "Penthouse Bonus!", body: "+₹10Cr", icon: "✨" });
+    } else if (last.kind === "card") {
+      setDrama({ id: last.id, tone: "card", title: "Card Drawn", body: last.message, icon: "🎴" });
+    } else if (last.kind === "standoff_end") {
+      setDrama({ id: last.id, tone: "win", title: "Standoff Settled", body: last.message, icon: "⚔️" });
+    }
+  }, [state.log, mySessionId]);
 
   const activeDeals = useMemo(
     () => state.sideDeals.filter((d) => d.status === "proposed"),
@@ -52,9 +93,29 @@ export function GameBoard(props: Props) {
   };
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col relative">
+      {/* Animated city atmosphere */}
+      <CityBackground mood={mood} intensity={state.round < 5 ? "calm" : "normal"} />
+
+      {/* Cinematic overlays */}
+      <TurnCinematic
+        player={state.players[state.current] ?? null}
+        isMyTurn={isMyTurn}
+        round={state.round}
+      />
+      <EventDrama event={drama} onDone={() => setDrama(null)} />
+
       {/* Top player bar */}
       <PlayerBar state={state} mySessionId={mySessionId} />
+
+      {/* Mute toggle (top right, always visible) */}
+      <button
+        onClick={() => { setMutedState(toggleMute()); playSfx("tap"); }}
+        className="fixed top-3 right-3 z-30 w-8 h-8 rounded-full glass-gold flex items-center justify-center text-sm hover:scale-110 transition-transform"
+        title={muted ? "Unmute" : "Mute"}
+      >
+        {muted ? "🔇" : "🔊"}
+      </button>
 
       {/* Split layout: mobile tabs / desktop side-by-side */}
       <div className="flex-1 min-h-0 lg:grid lg:grid-cols-[1fr_380px] lg:gap-0">

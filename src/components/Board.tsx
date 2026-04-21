@@ -10,11 +10,9 @@ interface Props {
   onSelectTile: (id: number | null) => void;
 }
 
-// Serpentine layout: 7 tiles per row, direction flips each row
 const COLS = 7;
 
 export function Board({ state, selectedTile, onSelectTile }: Props) {
-  // We need rows of tile ids, alternating direction
   const rows = useMemo(() => {
     const out: number[][] = [];
     let i = 0;
@@ -42,17 +40,23 @@ export function Board({ state, selectedTile, onSelectTile }: Props) {
 
   return (
     <div className="w-full max-w-5xl mx-auto">
-      <div className="relative rounded-2xl border border-gold-400/30 bg-navy-900/40 p-2 sm:p-3 shadow-gold">
+      <div className="relative rounded-2xl p-3 sm:p-4 card-luxe scan-lines"
+           style={{ boxShadow: "0 0 60px rgba(200,155,60,0.15), inset 0 1px 0 rgba(255,255,255,0.05)" }}>
         {/* Title ribbon */}
-        <div className="flex items-center justify-between px-2 pb-2">
-          <div className="text-[10px] tracking-[0.3em] uppercase text-gold-200/70">Borivali → Cuffe Parade</div>
-          <div className="text-[10px] tracking-[0.3em] uppercase text-gold-200/70">Round {state.round}</div>
+        <div className="flex items-center justify-between px-2 pb-2.5 border-b border-gold-400/15 mb-2.5">
+          <div className="cinzel text-[9px] tracking-[0.3em] text-gold-200/80">
+            BORIVALI &nbsp;→&nbsp; CUFFE PARADE
+          </div>
+          <div className="cinzel text-[9px] tracking-[0.3em] text-gold-200/80">
+            ROUND {state.round}
+          </div>
         </div>
+
         <div
           className="grid gap-1 sm:gap-1.5"
           style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))` }}
         >
-          {rows.flat().map((tileId, idx) => {
+          {rows.flat().map((tileId) => {
             const tile = TILES[tileId];
             const prop = state.properties[tileId];
             const playersHere = playersByTile[tileId] ?? [];
@@ -68,6 +72,12 @@ export function Board({ state, selectedTile, onSelectTile }: Props) {
             );
           })}
         </div>
+
+        {/* Corner ornaments */}
+        <div className="absolute top-2 left-2 w-3 h-3 border-t border-l border-gold-400/40 pointer-events-none" />
+        <div className="absolute top-2 right-2 w-3 h-3 border-t border-r border-gold-400/40 pointer-events-none" />
+        <div className="absolute bottom-2 left-2 w-3 h-3 border-b border-l border-gold-400/40 pointer-events-none" />
+        <div className="absolute bottom-2 right-2 w-3 h-3 border-b border-r border-gold-400/40 pointer-events-none" />
       </div>
     </div>
   );
