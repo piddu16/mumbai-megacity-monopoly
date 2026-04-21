@@ -15,7 +15,7 @@ export default function GamePage() {
   const router = useRouter();
   const code = (params.code ?? "").toUpperCase();
   const { sessionId, name, setName } = useSession();
-  const { room, players, state, connected, writeState } = useGameSync(code, sessionId);
+  const { room, players, state, connected, loadError, writeState } = useGameSync(code, sessionId);
 
   const [joinName, setJoinName] = useState("");
   const [joinBusy, setJoinBusy] = useState(false);
@@ -106,8 +106,19 @@ export default function GamePage() {
     }
   }
 
-  // Waiting on session + initial connect
-  if (!sessionId || !connected || !room) {
+  if (loadError) {
+    return (
+      <main className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center">
+          <p className="text-red-400 text-lg mb-3">{loadError}</p>
+          <p className="text-gold-100/60 text-sm mb-5">Room code: <span className="font-mono">{code}</span></p>
+          <Link className="btn-outline" href="/">Back home</Link>
+        </div>
+      </main>
+    );
+  }
+  // Waiting on session + initial room fetch. `connected` is a soft indicator, not a gate.
+  if (!sessionId || !room) {
     return (
       <main className="min-h-screen flex items-center justify-center px-4">
         <div className="text-center">
@@ -120,6 +131,7 @@ export default function GamePage() {
       </main>
     );
   }
+  void connected;
 
   // Connected but we're not a player in this room → join flow (if waiting) or spectate (if playing)
   if (!me) {

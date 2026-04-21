@@ -17,21 +17,32 @@ export function useGameSync(roomCode: string | null, sessionId: string) {
   const [players, setPlayers] = useState<DbPlayer[]>([]);
   const [state, setState] = useState<GameState | null>(null);
   const [connected, setConnected] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const lastSeqRef = useRef<number>(-1);
+  const roomIdRef = useRef<string | null>(null);
 
-  // Load room + subscribe
   useEffect(() => {
     if (!roomCode) return;
     let mounted = true;
+    setLoadError(null);
 
     async function load() {
-      const { data: r } = await supabase
+      const { data: r, error: roomErr } = await supabase
         .from("mm_rooms")
         .select("*")
         .eq("code", roomCode)
-        .single();
-      if (!mounted || !r) return;
+        .maybeSingle();
+      if (!mounted) return;
+      if (roomErr) {
+        setLoadError(roomErr.message);
+        return;
+      }
+      if (!r) {
+        setLoadError("Room not found");
+        return;
+      }
       const dbRoom = r as DbRoom;
+      roomIdRef.current = dbRoom.id;
       setRoom({
         id: dbRoom.id,
         code: dbRoom.code,
@@ -50,9 +61,9 @@ export function useGameSync(roomCode: string | null, sessionId: string) {
         .select("*")
         .eq("room_id", dbRoom.id)
         .order("player_number");
+      if (!mounted) return;
       setPlayers((ps ?? []) as DbPlayer[]);
 
-      // Upsert our own player presence
       const me = (ps ?? []).find((p) => (p as DbPlayer).session_id === sessionId);
       if (me) {
         await supabase
@@ -64,6 +75,18 @@ export function useGameSync(roomCode: string | null, sessionId: string) {
 
     load();
 
+    async function refreshPlayers() {
+      const rid = roomIdRef.current;
+      if (!rid) return;
+      const { data: ps } = await supabase
+        .from("mm_players")
+        .select("*")
+        .eq("room_id", rid)
+        .order("player_number");
+      if (!mounted) return;
+      setPlayers((ps ?? []) as DbPlayer[]);
+    }
+
     const channel = supabase
       .channel(`mm-room-${roomCode}`, { config: { presence: { key: sessionId } } })
       .on(
@@ -72,6 +95,7 @@ export function useGameSync(roomCode: string | null, sessionId: string) {
         (payload) => {
           if (payload.eventType === "DELETE") return;
           const r = payload.new as DbRoom;
+          roomIdRef.current = r.id;
           setRoom({
             id: r.id,
             code: r.code,
@@ -90,18 +114,7 @@ export function useGameSync(roomCode: string | null, sessionId: string) {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "mm_players" },
-        async (_payload) => {
-          // Refresh players
-          const rr = room;
-          if (rr) {
-            const { data: ps } = await supabase
-              .from("mm_players")
-              .select("*")
-              .eq("room_id", rr.id)
-              .order("player_number");
-            setPlayers((ps ?? []) as DbPlayer[]);
-          }
-        },
+        () => { refreshPlayers(); },
       )
       .subscribe((status) => {
         setConnected(status === "SUBSCRIBED");
@@ -116,15 +129,20 @@ export function useGameSync(roomCode: string | null, sessionId: string) {
 
   const writeState = useCallback(
     async (next: GameState) => {
-      if (!room) return;
+      const rid = roomIdRef.current;
+      if (!rid) return;
       lastSeqRef.current = next.seq;
-      await supabase
+      setState(next);
+      const { error } = await supabase
         .from("mm_rooms")
         .update({ game_state: next as unknown as Record<string, unknown>, updated_at: new Date().toISOString() })
-        .eq("id", room.id);
-      setState(next);
+        .eq("id", rid);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("[mm] writeState error:", error);
+      }
     },
-    [room],
+    [],
   );
 
   const broadcast = useCallback(
@@ -141,6 +159,7 @@ export function useGameSync(roomCode: string | null, sessionId: string) {
     players,
     state,
     connected,
+    loadError,
     writeState,
     broadcast,
   };
