@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/hooks/useSession";
 import { useGameSync } from "@/hooks/useGameSync";
 import { supabase } from "@/lib/supabase";
@@ -12,10 +12,14 @@ import { GameBoard } from "@/components/GameBoard";
 
 export default function GamePage() {
   const params = useParams<{ code: string }>();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const code = (params.code ?? "").toUpperCase();
   const { sessionId, name, setName } = useSession();
   const { room, players, state, connected, loadError, writeState } = useGameSync(code, sessionId);
+  // Host solo override: ?solo=1 lets the host dispatch actions for ANY player in this
+  // multiplayer room — useful for testing/dogfooding without friends present.
+  const soloOverride = searchParams?.get("solo") === "1";
 
   const [joinName, setJoinName] = useState("");
   const [joinBusy, setJoinBusy] = useState(false);
@@ -36,6 +40,12 @@ export default function GamePage() {
   const dispatch = useCallback(
     (action: GameAction) => {
       if (!state) return;
+      // Host solo override: bypass turn guard entirely so host can play every seat.
+      if (soloOverride && isHost) {
+        const next = reducer(state, action);
+        writeState(next);
+        return;
+      }
       // Client-side turn guard: only the current player can dispatch turn-gated actions.
       // Multi-player actions (auctions, chat, side deals, committee votes, standoff bets)
       // are always allowed. Server-authoritative enforcement lives in the Edge Function.
@@ -53,7 +63,7 @@ export default function GamePage() {
       const next = reducer(state, action);
       writeState(next);
     },
-    [state, writeState, sessionId],
+    [state, writeState, sessionId, soloOverride, isHost],
   );
 
   const startGame = useCallback(
@@ -225,5 +235,20 @@ export default function GamePage() {
     );
   }
 
-  return <GameBoard state={state} dispatch={dispatch} mySessionId={sessionId} roomCode={code} />;
+  // In solo override, pretend "me" is always the current player so the UI renders
+  // action buttons, transport picker, and role powers for whoever's turn it is.
+  const effectiveSessionId = soloOverride && isHost && state
+    ? state.players[state.current]?.id ?? sessionId
+    : sessionId;
+
+  return (
+    <>
+      {soloOverride && isHost && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40 chip cinzel tracking-widest bg-rust/20 border border-rust/60 text-rust text-[10px] flex items-center gap-2 px-3 py-1 rounded-full backdrop-blur">
+          🎯 HOST SOLO · playing all {state.players.length} seats
+        </div>
+      )}
+      <GameBoard state={state} dispatch={dispatch} mySessionId={effectiveSessionId} roomCode={code} />
+    </>
+  );
 }
