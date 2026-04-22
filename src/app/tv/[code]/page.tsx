@@ -103,6 +103,15 @@ export default function TvView() {
         {/* Current player spotlight */}
         <CurrentSpotlight state={state} />
 
+        {/* Persistent join URL bottom-left */}
+        <div className="fixed bottom-4 left-4 z-30 glass-gold rounded-lg px-3 py-2 pointer-events-none">
+          <div className="cinzel text-[8px] tracking-widest text-gold-200/70">CONTROL ON PHONE</div>
+          <div className="font-mono text-xs text-gold-100/90">{joinUrl}</div>
+          <div className="cinzel text-[8px] tracking-widest text-gold-200/50 mt-1">
+            HOST SOLO: add ?solo=1
+          </div>
+        </div>
+
         {/* Fullscreen takeovers */}
         {state.phase === "auction" && state.auction && <AuctionTakeover state={state} />}
         {state.phase === "standoff" && state.standoff && <StandoffTakeover state={state} />}
@@ -196,23 +205,47 @@ function CurrentSpotlight({ state }: { state: GameState }) {
   const cur = state.players[state.current];
   if (!cur) return null;
   const color = PLAYER_COLORS[cur.number];
+  const phaseLabel = phaseHint(state);
   return (
     <motion.div
       key={cur.id + state.turnNumber}
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="fixed top-4 left-1/2 -translate-x-1/2 z-30 glass-gold rounded-full px-5 py-2 flex items-center gap-3"
+      className="fixed top-4 left-1/2 -translate-x-1/2 z-30 glass-gold rounded-full px-5 py-2 flex items-center gap-3 max-w-[min(92vw,720px)]"
       style={{ borderColor: color, boxShadow: `0 0 20px ${color}88` }}
     >
-      <span className="cinzel text-[9px] tracking-widest" style={{ color }}>
+      <span className="cinzel text-[9px] tracking-widest shrink-0" style={{ color }}>
         NOW PLAYING
       </span>
-      <span className="text-xl">{PLAYER_TOKENS[cur.number]}</span>
-      <span className="heading font-bold text-lg" style={{ color }}>
+      <span className="text-xl shrink-0">{PLAYER_TOKENS[cur.number]}</span>
+      <span className="heading font-bold text-lg shrink-0" style={{ color }}>
         {cur.name}
       </span>
+      {phaseLabel && (
+        <span className="hidden sm:inline text-gold-100/60 text-sm border-l border-gold-400/30 pl-3 truncate">
+          {phaseLabel}
+        </span>
+      )}
     </motion.div>
   );
+}
+
+function phaseHint(state: GameState): string | null {
+  const cur = state.players[state.current];
+  if (!cur) return null;
+  switch (state.phase) {
+    case "turn_start":   return "choosing transport…";
+    case "rolling":      return "rolling dice…";
+    case "landed":
+    case "action":       return "deciding…";
+    case "auction":      return "auction in progress";
+    case "standoff":     return "standoff in progress";
+    case "committee":    return "committee vote";
+    case "redeveloping": return "redeveloping";
+    case "bankrupt":     return "bankruptcy resolution";
+    case "ended":        return "game over";
+    default:             return null;
+  }
 }
 
 function AuctionTakeover({ state }: { state: GameState }) {
