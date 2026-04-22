@@ -10,10 +10,16 @@ interface Props {
   mySessionId: string;
 }
 
+/**
+ * Responsive player bar.
+ * Mobile: compact — avatar + money only, current player bigger.
+ * Desktop: full HUD card per player.
+ */
 export function PlayerBar({ state, mySessionId }: Props) {
   return (
     <div className="sticky top-0 z-20 glass border-b border-gold-400/20">
-      <div className="flex items-stretch overflow-x-auto no-scrollbar px-2 py-2 gap-2">
+      {/* MOBILE: compact strip */}
+      <div className="lg:hidden flex items-center overflow-x-auto no-scrollbar px-2 py-1.5 gap-1.5">
         {state.players.map((p, i) => {
           const isCurrent = i === state.current;
           const isMe = p.id === mySessionId;
@@ -22,7 +28,64 @@ export function PlayerBar({ state, mySessionId }: Props) {
           const role = ROLE_INFO[p.role];
           const offline = p.connected === false;
           const moneyCr = p.money / CRORE;
+          return (
+            <motion.div
+              key={p.id}
+              layout
+              animate={isCurrent ? { scale: 1.04 } : { scale: 1 }}
+              transition={{ type: "spring", stiffness: 300, damping: 22 }}
+              className="relative shrink-0 flex items-center gap-1.5 rounded-full pl-1 pr-2 py-1"
+              style={{
+                background: isCurrent
+                  ? `linear-gradient(90deg, ${color}33 0%, rgba(11,11,15,0.7) 100%)`
+                  : "rgba(11,11,15,0.5)",
+                border: isCurrent ? `1px solid ${color}` : "1px solid rgba(255,255,255,0.07)",
+                boxShadow: isCurrent ? `0 0 12px ${color}66` : undefined,
+                opacity: offline ? 0.55 : 1,
+              }}
+            >
+              <MoneyDelta value={p.money} />
+              <div className="relative shrink-0">
+                <span
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-xs"
+                  style={{
+                    background: `radial-gradient(circle at 30% 30%, ${color}, ${color}cc)`,
+                    boxShadow: isCurrent ? `0 0 8px ${color}` : undefined,
+                  }}
+                  title={`${p.name} — ${role.name}`}
+                >
+                  {token}
+                </span>
+                {isMe && (
+                  <span
+                    className="absolute -top-0.5 -left-0.5 w-2 h-2 rounded-full bg-gold-300 border border-ink-950"
+                    title="You"
+                  />
+                )}
+              </div>
+              <div className="flex flex-col leading-none">
+                <span className="text-[10px] font-semibold truncate max-w-[60px]" style={{ color: isCurrent ? color : "#F5EAD1" }}>
+                  {p.name}
+                </span>
+                <span className="money text-[10px] tabular-nums">
+                  ₹<CountUp end={moneyCr} duration={0.7} decimals={moneyCr < 10 ? 1 : 0} preserveValue />Cr
+                </span>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
 
+      {/* DESKTOP: full HUD */}
+      <div className="hidden lg:flex items-stretch overflow-x-auto no-scrollbar px-2 py-2 gap-2">
+        {state.players.map((p, i) => {
+          const isCurrent = i === state.current;
+          const isMe = p.id === mySessionId;
+          const color = PLAYER_COLORS[p.number];
+          const token = PLAYER_TOKENS[p.number];
+          const role = ROLE_INFO[p.role];
+          const offline = p.connected === false;
+          const moneyCr = p.money / CRORE;
           return (
             <motion.div
               key={p.id}
@@ -34,16 +97,11 @@ export function PlayerBar({ state, mySessionId }: Props) {
                 background: isCurrent
                   ? `linear-gradient(180deg, ${color}22 0%, rgba(11,11,15,0.9) 100%)`
                   : "linear-gradient(180deg, rgba(19,21,33,0.7) 0%, rgba(11,11,15,0.7) 100%)",
-                border: isCurrent
-                  ? `1px solid ${color}`
-                  : "1px solid rgba(255,255,255,0.08)",
-                boxShadow: isCurrent
-                  ? `0 0 24px ${color}66, inset 0 1px 0 rgba(255,255,255,0.08)`
-                  : "inset 0 1px 0 rgba(255,255,255,0.03)",
+                border: isCurrent ? `1px solid ${color}` : "1px solid rgba(255,255,255,0.08)",
+                boxShadow: isCurrent ? `0 0 24px ${color}66, inset 0 1px 0 rgba(255,255,255,0.08)` : "inset 0 1px 0 rgba(255,255,255,0.03)",
                 opacity: offline ? 0.55 : 1,
               }}
             >
-              {/* Current-player spotlight */}
               {isCurrent && (
                 <motion.div
                   className="absolute inset-0 rounded-xl pointer-events-none"
@@ -52,8 +110,6 @@ export function PlayerBar({ state, mySessionId }: Props) {
                   style={{ boxShadow: `inset 0 0 20px ${color}44` }}
                 />
               )}
-
-              {/* "Me" marker */}
               {isMe && (
                 <span
                   className="absolute -top-1.5 left-3 px-1.5 py-px rounded cinzel text-[8px] tracking-widest"
@@ -62,7 +118,6 @@ export function PlayerBar({ state, mySessionId }: Props) {
                   YOU
                 </span>
               )}
-
               <div className="flex items-center gap-2 relative">
                 <MoneyDelta value={p.money} />
                 <div className="relative shrink-0">
@@ -77,9 +132,7 @@ export function PlayerBar({ state, mySessionId }: Props) {
                     {token}
                   </span>
                   <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-ink-950 ${
-                      offline ? "bg-gray-500" : "bg-emerald-400"
-                    }`}
+                    className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-ink-950 ${offline ? "bg-gray-500" : "bg-emerald-400"}`}
                     style={offline ? {} : { boxShadow: "0 0 6px rgba(0,184,148,0.8)" }}
                   />
                 </div>
@@ -92,15 +145,9 @@ export function PlayerBar({ state, mySessionId }: Props) {
                   </div>
                 </div>
               </div>
-
               <div className="mt-1.5 flex items-center justify-between">
                 <div className="money text-[11px] font-bold">
-                  ₹<CountUp
-                    end={moneyCr}
-                    duration={0.8}
-                    decimals={moneyCr < 10 ? 1 : 0}
-                    preserveValue
-                  />Cr
+                  ₹<CountUp end={moneyCr} duration={0.8} decimals={moneyCr < 10 ? 1 : 0} preserveValue />Cr
                 </div>
                 <div className="flex items-center gap-0.5 text-[10px] text-gold-100/60">
                   <span>🏘️</span>

@@ -19,6 +19,11 @@ import { RolePowers } from "./RolePowers";
 import { CityBackground } from "./CityBackground";
 import { TurnCinematic } from "./TurnCinematic";
 import { EventDrama, type DramaEvent } from "./EventDrama";
+import { TurnTimer } from "./TurnTimer";
+import { ReactionLayer } from "./ReactionLayer";
+import { ZoneMeter } from "./ZoneMeter";
+import { VoluntaryChallenge } from "./VoluntaryChallenge";
+import { RoleNudge } from "./RoleNudge";
 import { formatMoney } from "@/lib/constants";
 import { playSfx, toggleMute, isMuted } from "@/lib/sound";
 
@@ -129,9 +134,25 @@ export function GameBoard(props: Props) {
             />
           </div>
 
+          {/* Zone monopoly progress meter */}
+          <div className="border-t border-gold-400/15 glass shrink-0">
+            <ZoneMeter state={state} />
+          </div>
+
           {/* Current turn action area */}
-          <div className="border-t border-gold-400/20 bg-navy-950/80 backdrop-blur p-3 space-y-2 shrink-0">
+          <div className="border-t border-gold-400/20 glass p-2.5 sm:p-3 space-y-2 shrink-0">
             <TurnHeader state={state} mySessionId={mySessionId} />
+
+            {/* Turn timer — resets on turn change */}
+            {state.phase !== "ended" && state.phase !== "auction" && state.phase !== "standoff" && (
+              <TurnTimer
+                seconds={60}
+                turnKey={`${state.current}-${state.turnNumber}`}
+              />
+            )}
+
+            {/* Role nudge — contextual power hint */}
+            {me && <RoleNudge state={state} me={me} />}
 
             {state.phase === "turn_start" && isMyTurn && (
               <TransportPicker
@@ -150,12 +171,18 @@ export function GameBoard(props: Props) {
             )}
 
             {(state.phase === "landed" || state.phase === "action") && isMyTurn && me && (
-              <ActionPanel state={state} me={me} dispatch={dispatch} />
+              <div className="flex flex-wrap items-center gap-2">
+                <ActionPanel state={state} me={me} dispatch={dispatch} />
+                <VoluntaryChallenge state={state} me={me} dispatch={dispatch} />
+              </div>
             )}
 
             {!isMyTurn && state.phase !== "ended" && !isSpectator && (
-              <div className="text-center text-gold-100/60 text-sm py-2">
-                <span className="gold-shimmer font-semibold">{state.players[state.current]?.name}</span>&apos;s turn
+              <div className="flex items-center justify-between">
+                <div className="text-gold-100/60 text-sm py-1">
+                  <span className="gold-shimmer font-semibold">{state.players[state.current]?.name}</span>&apos;s turn
+                </div>
+                {me && <VoluntaryChallenge state={state} me={me} dispatch={dispatch} />}
               </div>
             )}
 
@@ -208,8 +235,8 @@ export function GameBoard(props: Props) {
         )}
       </div>
 
-      {/* Mobile tab bar */}
-      <nav className="lg:hidden sticky bottom-0 bg-navy-950/95 backdrop-blur border-t border-gold-400/30 flex items-stretch z-30 shrink-0">
+      {/* Mobile tab bar — slimmer, icons-only */}
+      <nav className="lg:hidden sticky bottom-0 glass border-t border-gold-400/30 flex items-stretch z-30 shrink-0">
         {[
           { id: "game", label: "Board", emoji: "🎲", badge: 0 },
           { id: "chat", label: "Chat", emoji: "💬", badge: 0 },
@@ -219,21 +246,24 @@ export function GameBoard(props: Props) {
           <button
             key={t.id}
             onClick={() => setMobileTab(t.id as Tab)}
-            className={`flex-1 flex flex-col items-center justify-center py-2 relative ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 relative text-xs ${
               mobileTab === t.id ? "text-gold-300" : "text-gold-100/50"
             }`}
           >
-            <span className="text-xl">{t.emoji}</span>
+            <span className="text-base">{t.emoji}</span>
             <span className="text-[10px] tracking-wider">{t.label}</span>
             {t.badge > 0 && (
-              <span className="absolute top-1 right-[calc(50%-20px)] bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+              <span className="absolute top-1 right-2 bg-crimson text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
                 {t.badge}
               </span>
             )}
-            {mobileTab === t.id && <span className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-gold-400" />}
+            {mobileTab === t.id && <span className="absolute top-0 left-1/4 right-1/4 h-0.5" style={{ background: "#C89B3C", boxShadow: "0 0 6px #C89B3C" }} />}
           </button>
         ))}
       </nav>
+
+      {/* Reactions layer — always available */}
+      <ReactionLayer state={state} mySessionId={mySessionId} dispatch={dispatch} />
     </div>
   );
 }
